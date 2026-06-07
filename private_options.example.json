@@ -1,0 +1,18 @@
+{
+  "lesson_types": [
+    "Lesson A",
+    "Lesson B"
+  ],
+  "lesson_times": [
+    "10:00~",
+    "11:30~"
+  ],
+  "instructor_names": [
+    "Instructor A",
+    "Instructor B"
+  ],
+  "horse_names": [
+    "Horse A",
+    "Horse B"
+  ]
+}
