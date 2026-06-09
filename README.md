@@ -33,3 +33,8 @@ http://127.0.1:8000
 ```
 
 ## Future Improvement
+- Design modify using CSS
+- Editing feature for past records
+- Searching feature for past records
+- Applying PostgreSQL
+- Opening server connection

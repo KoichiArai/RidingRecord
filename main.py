@@ -1,8 +1,8 @@
 import sqlite3
 from datetime import datetime
 import json
-
-from fastapi import FastAPI, Form
+import html as html_escape
+from fastapi import FastAPI, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 DB_NAME = "records.db"
@@ -42,12 +42,21 @@ def build_options_html(items):
 
     return html
 
+def build_options_html_with_selected(items, selected_value):
+    html ='<option value="">選択してください</option>\n'
+
+    for item in items:
+        selected = "selected" if item == selected_value else ""
+        html += f'<option valur="{item}" {selected}>{item}</option>\n'
+    
+    return html
+
 @app.on_event("startup")
 def on_startup():
     init_db()
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+def index(keyword: str = Query(default="")):
     options = load_options()
 
     lesson_type_options = build_options_html(options["lesson_types"])
@@ -58,12 +67,35 @@ def index():
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
 
-    cur.execute("""
-    SELECT record_id, riding_date, lesson_type, lesson_time, instructor_name,
-    horse_name, horse_memo, body
-    From records
-    ORDER BY record_id DESC
-    """)
+    if keyword:
+        search_word = f"%{keyword}%"
+
+        cur.execute("""
+        SELECT record_id, riding_date, lesson_type, lesson_time, instructor_name,
+               horse_name, horse_memo, body
+        FROM records
+        WHERE lesson_type LIKE ?
+           OR lesson_time LIKE ?
+           OR instructor_name LIKE ?
+           OR horse_name LIKE ?
+           OR horse_memo LIKE ?
+           OR body LIKE ?
+        ORDER BY record_id DESC
+        """, (
+            search_word,
+            search_word,
+            search_word,
+            search_word,
+            search_word,
+            search_word
+        ))
+    else:
+        cur.execute("""
+        SELECT record_id, riding_date, lesson_type, lesson_time, instructor_name,
+               horse_name, horse_memo, body
+        FROM records
+        ORDER BY record_id DESC
+        """)
 
     records = cur.fetchall()
     conn.close()
@@ -119,9 +151,18 @@ def index():
 
         <hr>
 
+        <form action="/" method="get">
+            <input type="text" name="keyword" placeholder="検索ｷｰﾜｰﾄﾞ">
+            <button type="submit">検索</button>
+            <a href="/">クリア</a>
+        </form>
+
+        <hr>
+        
         <h2>記録一覧</h2>
     """
 
+    # 記録の追加部分
     for record in records:
         record_id, riding_date, lesson_type, lesson_time, instructor_name, horse_name, horse_memo, body = record
         html += f"""
@@ -133,12 +174,17 @@ def index():
             <p><strong>馬匹名:</strong> {horse_name}</p>
             <p><strong>馬匹メモ:</strong> {horse_memo}</p>
             <p>{body}</p>
+            <form action="/records/{record_id}/edit" method="get">
+                <button type="submit">編集</button>
+            </form>
             <form action="/records/{record_id}/delete" method="post"
                   onsubmit="return confirm('この記録を削除しますか？')">
                 <button type="submit">削除</button>
             </form>
         </div>
         """
+
+    # 騎乗記録各要素の未記入防止
     html += """
     <script>
     function validateForm() {
@@ -186,6 +232,7 @@ def index():
     </html>
     """
     return html
+
 @app.post("/records")
 def create_record(
     riding_date: str = Form(...),
@@ -237,3 +284,141 @@ def delete_record(record_id: int):
     content='<meta http-equiv="refresh" content="0; url=/" />',
     status_code=303
 )
+
+@app.get("/records/{record_id}/edit", response_class=HTMLResponse)
+def edit_record_page(record_id: int):
+    options = load_options()
+
+    lesson_type_options = build_options_html(options["lesson_types"])
+    lesson_time_options = build_options_html(options["lesson_times"])
+    instructor_name_options = build_options_html(options["instructor_names"])
+    horse_name_options = build_options_html(options["horse_names"])
+
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT record_id, riding_date, lesson_type, lesson_time, instructor_name,
+               horse_name, horse_memo, body
+        FROM records
+        WHERE record_id = ?
+    """, (record_id,))
+
+    record = cur.fetchone()
+    conn.close()
+
+    if record is None:
+        return HTMLResponse("指定された記録が見つかりません。", status_code=404)
+    
+    record_id, riding_date, lesson_type, lesson_time, instructor_name, horse_name, horse_memo, body = record
+
+    lesson_type_options = build_options_html_with_selected(
+        options["lesson_types"],
+        lesson_type
+    )
+    lesson_time_options = build_options_html_with_selected(
+        options["lesson_times"],
+        lesson_time
+    )
+    instructor_name_options = build_options_html_with_selected(
+        options["instructor_names"],
+        instructor_name
+    )
+    horse_name_options = build_options_html_with_selected(
+        options["horse_names"],
+        horse_name
+    )
+
+    safe_body = html_escape.escape(body)
+    html = f"""
+    <html>
+    <head>
+        <meta charset="utd-8">
+        <title>記録編集</title>
+    </head>
+    <body>
+        <h1>記録編集</h1>
+        <form action="/records/{record_id}/edit" method="post">
+            <p>
+                日付:<br>
+                <input type="date" name="riding_date" value="{riding_date}" required>
+            </p>
+            <p>
+                レッスン名:<br>
+                <select id="lesson_type" name="lesson_type" required>
+                    {lesson_type_options}
+                </select>
+            </p>
+            <p>
+                レッスン時間:<br>
+                <select id="lesson_time" name="lesson_time" required>
+                    {lesson_time_options}
+                </select>
+            </p>
+            <p>
+                指導員名:<br>
+                <select id="instructor_name" name="instructor_name" required>
+                    {instructor_name_options}
+                </select>
+            </p>
+            <p>
+                馬匹名:<br>
+                <select id="horse_name" name="horse_name" required>
+                    {horse_name_options}
+                </select>
+            </p>
+            <p>
+                馬匹備考:<br>
+                <input type="text" id="horse_memo" name="horse_memo" value="{horse_memo}" required>
+            </p>
+            <p>
+                騎乗記録:<br>
+                <textarea name="body" rows="5" cols="60" required>{safe_body}</textarea>
+            </p>
+            <button type="submit">更新</button>
+        </form>
+
+        <p><a href="/">戻る</a>
+    </body>
+    </html>
+    """
+    return html
+@app.post("/records/{record_id}/edit")
+def update_record(
+    record_id: int,
+    riding_date: str = Form(...),
+    lesson_type: str = Form(...),
+    lesson_time: str = Form(...),
+    instructor_name: str = Form(...),
+    horse_name: str = Form(...),
+    horse_memo: str = Form(...),
+    body: str = Form(...)
+):
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+
+    cur.execute("""
+    UPDATE records
+    SET riding_date = ?,
+        lesson_type = ?,
+        lesson_time = ?,
+        instructor_name = ?,
+        horse_name = ?,
+        horse_memo = ?,
+        body = ?
+    WHERE record_id = ?
+    """, (
+        riding_date,
+        lesson_type,
+        lesson_time,
+        instructor_name,
+        horse_name,
+        horse_memo,
+        body,
+        record_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return RedirectResponse(url="/", status_code=303)
